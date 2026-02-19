@@ -18,7 +18,8 @@ LEVERAGE = 25
 SL_POINTS = 10.0     
 TP_POINTS = 20.0     
 
-# Global Stats Tracker - MOVED TO TOP FOR ACCESS
+# Global State & Stats
+is_trading_active = False # Default to OFF for safety
 daily_stats = {"wins": 0, "losses": 0, "total_points": 0.0, "start_time": time.time()}
 latest_data = {"price": 0.0, "rsi": 0.0}
 
@@ -35,7 +36,28 @@ try:
 except:
     pass
 
-# ===== 3. COMMAND HANDLERS (MUST BE BEFORE POLLING) =====
+# ===== 3. TELEGRAM COMMAND HANDLERS =====
+
+@bot.message_handler(commands=['start'])
+def start_bot(message):
+    global is_trading_active
+    is_trading_active = True
+    welcome_text = (
+        "👋 **Welcome to your Delta Trading Bot!**\n\n"
+        "🟢 **Auto-Trading: STARTED**\n"
+        "The bot is now scanning ETH/USDT for signals.\n\n"
+        "**Available Commands:**\n"
+        "📊 /price - Get current ETH price & RSI\n"
+        "📈 /report - See session profit/loss\n"
+        "🛑 /stop - Stop auto-trading"
+    )
+    bot.reply_to(message, welcome_text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['stop'])
+def stop_bot(message):
+    global is_trading_active
+    is_trading_active = False
+    bot.reply_to(message, "🛑 **Auto-Trading: STOPPED**\nThe bot will still track price but will NOT place new trades.", parse_mode="Markdown")
 
 @bot.message_handler(commands=['price', 'status'])
 def send_price(message):
@@ -43,9 +65,8 @@ def send_price(message):
     if latest_data["price"] == 0.0:
         bot.reply_to(message, "⏳ Still syncing market data... Wait 30s.")
     else:
-        text = (f"📊 *ETH/USDT Status*\n"
-                f"Price: {latest_data['price']}\n"
-                f"RSI: {latest_data['rsi']:.2f}")
+        text = (f"📊 *ETH/USDT Status*\nPrice: {latest_data['price']}\nRSI: {latest_data['rsi']:.2f}\n"
+                f"Trading Mode: {'🟢 ACTIVE' if is_trading_active else '🔴 STOPPED'}")
         bot.reply_to(message, text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['report'])
@@ -57,7 +78,7 @@ def manual_report(message):
               f"Net Points: {daily_stats['total_points']:.2f}")
     bot.reply_to(message, report, parse_mode="Markdown")
 
-# ===== 4. BACKGROUND LOGIC =====
+# ===== 4. BACKGROUND LOGIC & TRADING =====
 
 def send_daily_report():
     global daily_stats
@@ -111,7 +132,7 @@ def execute_trade(side, entry_price):
         bot.send_message(TG_CHAT_ID, f"❌ **ORDER ERROR:** {e}")
 
 def run_strategy():
-    global latest_data
+    global latest_data, is_trading_active
     last_signal_time = None
     while True:
         try:
@@ -119,7 +140,7 @@ def run_strategy():
             df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
             df['close'] = df['close'].astype(float)
             
-            # EMA & RSI Calculation
+            # EMA & RSI Fix
             df['ema_f'] = df['close'].ewm(span=15, adjust=False).mean()
             df['ema_s'] = df['close'].ewm(span=33, adjust=False).mean()
             delta = df['close'].diff()
@@ -137,8 +158,9 @@ def run_strategy():
             sell_sig = (curr['ema_f'] < curr['ema_s']) and (curr['low'] <= curr['ema_f'] <= curr['high']) and (curr['close'] < curr['open']) and body_pct >= 60 and curr['rsi'] < 40
 
             if (buy_sig or sell_sig) and curr['ts'] != last_signal_time:
-                execute_trade('buy' if buy_sig else 'sell', curr['close'])
-                last_signal_time = curr['ts']
+                if is_trading_active:
+                    execute_trade('buy' if buy_sig else 'sell', curr['close'])
+                    last_signal_time = curr['ts']
 
             time.sleep(30)
         except:
@@ -147,11 +169,8 @@ def run_strategy():
 # ===== 5. MAIN START =====
 
 if __name__ == "__main__":
-    keep_alive() # Flask for Render
-    
-    # Start background threads BEFORE polling
+    keep_alive() 
     Thread(target=run_strategy, daemon=True).start()
     Thread(target=send_daily_report, daemon=True).start()
-    
     print("🤖 Bot is starting infinity polling...")
     bot.infinity_polling(timeout=60, long_polling_timeout=5)

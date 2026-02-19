@@ -10,7 +10,7 @@ from keep_alive import keep_alive
 # ===== 1. CONFIGURATION (SECURE) =====
 TG_TOKEN = os.environ.get('TG_TOKEN')
 TG_CHAT_ID = "7729719892" 
-SYMBOL = 'ETHUSD' 
+SYMBOL = 'ETH/USD:USD' 
 
 # Trade Settings
 TRADE_AMOUNT = 0.01  
